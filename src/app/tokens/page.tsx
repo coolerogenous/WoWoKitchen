@@ -3,154 +3,121 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthContext";
-import { tokenApi } from "@/lib/api";
+import { shareApi, tokenApi } from "@/lib/api";
 
 export default function TokensPage() {
     const { user, isLoading } = useAuth();
     const router = useRouter();
-    const [tokenInput, setTokenInput] = useState("");
-    const [decoding, setDecoding] = useState(false);
-    const [result, setResult] = useState<{
-        ingredientsCreated: number;
-        ingredientsReused: number;
-        dishesCreated: number;
-        menuCreated: boolean;
-        menuName: string;
-    } | null>(null);
+    const [code, setCode] = useState("");
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    const [importResult, setImportResult] = useState<string | null>(null);
 
-    useEffect(() => {
-        if (!isLoading && !user) { router.replace("/"); }
-    }, [user, isLoading, router]);
+    // 允许未登录访问此页面用于输入分享码（特别是饭局码）
+    // 但导入菜单/菜品需要登录
 
-    const handleDecode = async (e: React.FormEvent) => {
+    const handleImport = async (e: React.FormEvent) => {
         e.preventDefault();
         setError("");
-        setResult(null);
-        setDecoding(true);
+        setImportResult(null);
+        setLoading(true);
 
         try {
-            const res = await tokenApi.decode(tokenInput.trim());
-            if (res.success && res.data) {
-                setResult(res.data);
-                setTokenInput("");
-            } else {
-                setError(res.error || "解码失败");
+            // 1. 解析分享码
+            const res = await shareApi.get(code);
+
+            if (!res.success || !res.data) {
+                setError(res.error || "无效的分享码");
+                setLoading(false);
+                return;
             }
-        } catch {
-            setError("网络错误，请稍后重试");
+
+            const { type, data } = res.data;
+
+            if (type === "PARTY") {
+                // 是饭局，跳转到饭局详情页
+                router.push(`/parties/${code}`);
+                return;
+            }
+
+            // 是 Dish 或 Menu，需要导入
+            if (!user) {
+                setError("导入菜品/菜单需要先登录");
+                setLoading(false);
+                return;
+            }
+
+            // 2. 调用导入接口
+            const importRes = await tokenApi.importData(data);
+
+            if (importRes.success && importRes.data) {
+                const r = importRes.data;
+                let msg = "导入成功！";
+                if (r.menuCreated) {
+                    msg += ` 菜单: ${r.menuName}`;
+                }
+                msg += ` (新增食材: ${r.ingredientsCreated}, 复用食材: ${r.ingredientsReused})`;
+                setImportResult(msg);
+                setCode(""); // 清空以便下次输入
+            } else {
+                setError(importRes.error || "导入失败");
+            }
+
+        } catch (err) {
+            console.error(err);
+            setError("网络错误");
         } finally {
-            setDecoding(false);
+            setLoading(false);
         }
     };
 
-    if (isLoading || !user) return null;
-
     return (
-        <div>
-            <h1>🔐 密语系统</h1>
-            <p style={styles.desc}>
-                密语是旺财厨房的数据分享功能。你可以在菜单页生成密语，也可以在此导入他人分享的密语。
+        <div style={styles.container}>
+            <h1 style={{ marginBottom: 10 }}>🔍 发现与导入</h1>
+            <p style={{ color: '#666', marginBottom: 40 }}>
+                输入 6 位分享码，加入饭局或获取已分享的菜谱。
             </p>
 
             <div style={styles.card}>
-                <h3>📥 导入密语</h3>
-                <form onSubmit={handleDecode}>
-                    <textarea
-                        placeholder="粘贴密语内容（以 WK: 开头）"
-                        value={tokenInput}
-                        onChange={(e) => setTokenInput(e.target.value)}
-                        style={styles.textarea}
-                        required
+                <form onSubmit={handleImport} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <input
+                        value={code}
+                        onChange={e => setCode(e.target.value.toUpperCase())}
+                        placeholder="A1B2C3"
+                        maxLength={6}
+                        style={styles.input}
                     />
-                    {error && <div style={styles.error}>{error}</div>}
-                    <button type="submit" style={styles.submitBtn} disabled={decoding}>
-                        {decoding ? "解码中..." : "🔓 解码并导入"}
+                    <button disabled={loading} style={styles.btn}>
+                        {loading ? "查询中..." : "🚀 前往 / 导入"}
                     </button>
                 </form>
+
+                {error && <div style={styles.error}>{error}</div>}
+                {importResult && <div style={styles.success}>{importResult}</div>}
             </div>
 
-            {result && (
-                <div style={styles.resultCard}>
-                    <h3>✅ 导入成功！</h3>
-                    <div style={styles.resultGrid}>
-                        <div style={styles.resultItem}>
-                            <div style={styles.resultNum}>{result.dishesCreated}</div>
-                            <div style={styles.resultLabel}>新建菜品</div>
-                        </div>
-                        <div style={styles.resultItem}>
-                            <div style={styles.resultNum}>{result.ingredientsCreated}</div>
-                            <div style={styles.resultLabel}>新建食材</div>
-                        </div>
-                        <div style={styles.resultItem}>
-                            <div style={styles.resultNum}>{result.ingredientsReused}</div>
-                            <div style={styles.resultLabel}>复用食材</div>
-                        </div>
-                        {result.menuCreated && (
-                            <div style={styles.resultItem}>
-                                <div style={styles.resultNum}>1</div>
-                                <div style={styles.resultLabel}>新建菜单: {result.menuName}</div>
-                            </div>
-                        )}
-                    </div>
-                    <div style={styles.resultActions}>
-                        <button style={styles.viewBtn} onClick={() => router.push("/dishes")}>
-                            查看菜品 →
-                        </button>
-                        {result.menuCreated && (
-                            <button style={styles.viewBtn} onClick={() => router.push("/menus")}>
-                                查看菜单 →
-                            </button>
-                        )}
-                    </div>
+            {!user && (
+                <div style={{ marginTop: 40, fontSize: 13, color: '#888' }}>
+                    💡 提示：加入饭局无需登录，但导入菜谱需先<a href="/" style={{ color: '#333', textDecoration: 'underline' }}>登录</a>。
                 </div>
             )}
-
-            <div style={styles.card}>
-                <h3>📤 生成密语</h3>
-                <p style={styles.tipText}>
-                    前往 <a href="/dishes" style={styles.link}>菜品管理</a> 或{" "}
-                    <a href="/menus" style={styles.link}>菜单管理</a> 页面，点击"生成密语"按钮。
-                </p>
-            </div>
         </div>
     );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-    desc: { color: "#666", fontSize: 15, marginBottom: 24 },
-    card: {
-        background: "#fff", borderRadius: 10, padding: 24,
-        boxShadow: "0 1px 6px rgba(0,0,0,0.06)", marginBottom: 20,
+    container: { maxWidth: 600, margin: "60px auto", padding: 20, textAlign: 'center' },
+    card: { background: '#fff', padding: 40, borderRadius: 16, boxShadow: '0 10px 30px rgba(0,0,0,0.08)' },
+    input: {
+        fontSize: 32, letterSpacing: 8, width: 240, textAlign: 'center', padding: "12px 0",
+        border: 'none', borderBottom: '2px solid #eee', outline: 'none', marginBottom: 30,
+        textTransform: 'uppercase', fontFamily: 'monospace', fontWeight: 'bold', color: '#333'
     },
-    textarea: {
-        width: "100%", minHeight: 100, padding: 12, border: "1px solid #ddd",
-        borderRadius: 8, fontSize: 13, fontFamily: "monospace", resize: "vertical",
-        marginTop: 8,
+    btn: {
+        padding: "12px 40px", fontSize: 16, fontWeight: 600, borderRadius: 30,
+        background: "#1a1a2e", color: "#fff", border: "none", cursor: "pointer",
+        transition: 'transform 0.1s', boxShadow: '0 4px 12px rgba(26,26,46,0.2)'
     },
-    error: { color: "#e74c3c", fontSize: 14, marginTop: 8 },
-    submitBtn: {
-        marginTop: 12, padding: "10px 24px", border: "none", borderRadius: 8,
-        backgroundColor: "#1a1a2e", color: "#fff", cursor: "pointer", fontSize: 15,
-    },
-    resultCard: {
-        background: "#f0fdf4", borderRadius: 10, padding: 24,
-        border: "1px solid #bbf7d0", marginBottom: 20,
-    },
-    resultGrid: {
-        display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-        gap: 12, marginTop: 16,
-    },
-    resultItem: {
-        background: "#fff", borderRadius: 8, padding: 16, textAlign: "center",
-    },
-    resultNum: { fontSize: 28, fontWeight: 700, color: "#27ae60" },
-    resultLabel: { fontSize: 13, color: "#666", marginTop: 4 },
-    resultActions: { display: "flex", gap: 10, marginTop: 16 },
-    viewBtn: {
-        padding: "8px 16px", border: "1px solid #27ae60", borderRadius: 6,
-        background: "transparent", color: "#27ae60", cursor: "pointer", fontSize: 14,
-    },
-    tipText: { color: "#666", fontSize: 14 },
-    link: { color: "#3498db" },
+    error: { marginTop: 20, color: "#e74c3c", background: '#fdedec', padding: '10px 20px', borderRadius: 8 },
+    success: { marginTop: 20, color: "#27ae60", background: '#edf7ed', padding: '10px 20px', borderRadius: 8 },
 };

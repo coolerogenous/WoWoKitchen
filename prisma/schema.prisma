@@ -81,7 +81,17 @@ model MenuDish {
   menu   Menu @relation(fields: [menuId], references: [id], onDelete: Cascade)
   dish   Dish @relation(fields: [dishId], references: [id])
 
-  @@unique([menuId, dishId]) // 同一菜单中同一菜品只添加一次
+  @@unique([menuId, dishId])
+}
+
+// ==================== 分享码 (6位短码) ====================
+model ShareToken {
+  code      String   @id // 6位随机码
+  type      String   // "DISH" | "MENU"
+  refId     Int      // 关联的 DishId 或 MenuId
+  userId    Int      // 创建者
+  createdAt DateTime @default(now())
+  expiresAt DateTime? // 可选过期时间
 }
 
 // ==================== 饭局 ====================
@@ -89,35 +99,59 @@ model Party {
   id        Int          @id @default(autoincrement())
   name      String
   status    String       @default("ACTIVE") // ACTIVE | LOCKED
-  shareCode String       @unique            // 分享码
+  shareCode String       @unique            // 饭局本身的分享码 (6位)
   hostId    Int
   host      User         @relation(fields: [hostId], references: [id])
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
-  dishes    PartyDish[]
-  guests    PartyGuest[]
+  
+  // 饭局的"菜品池" (由 Host 添加，供 Guest 选择)
+  poolDishes PartyDishPool[]
+
+  // 饭局的宾客
+  guests     PartyGuest[]
 }
 
-// ==================== 饭局菜品（快照） ====================
-model PartyDish {
-  id                  Int         @id @default(autoincrement())
+// ==================== 饭局菜品池 (备选池) ====================
+model PartyDishPool {
+  id                  Int      @id @default(autoincrement())
   partyId             Int
-  dishName            String                    // 菜品名称快照
-  ingredientsSnapshot String      @db.Text      // JSON: [{name, quantity, unit, unitPrice}]
-  costSnapshot        Float                     // 成本快照
-  addedByGuestId      Int?                      // 如果是游客添加的
-  party               Party       @relation(fields: [partyId], references: [id], onDelete: Cascade)
-  addedByGuest        PartyGuest? @relation(fields: [addedByGuestId], references: [id])
-  createdAt           DateTime    @default(now())
+  dishName            String                // 菜品名称快照
+  ingredientsSnapshot String   @db.Text     // JSON: [{name, quantity, unit, unitPrice, spec}]
+  costSnapshot        Float                 // 成本快照
+  originalDishId      Int?                  // 关联的原菜品ID (可选)
+  
+  party               Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  
+  // 哪些宾客选择了这道菜
+  selections          GuestSelection[]
+
+  createdAt           DateTime @default(now())
 }
 
-// ==================== 饭局游客 ====================
+// ==================== 饭局宾客 ====================
 model PartyGuest {
-  id         Int         @id @default(autoincrement())
+  id         Int              @id @default(autoincrement())
   partyId    Int
   nickname   String
-  guestToken String      @unique // 游客身份标识
-  party      Party       @relation(fields: [partyId], references: [id], onDelete: Cascade)
-  dishes     PartyDish[]
-  createdAt  DateTime    @default(now())
+  guestToken String           @unique // 游客身份标识 (UUID)
+  
+  party      Party            @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  
+  // 宾客选择的菜品
+  selections GuestSelection[]
+  
+  createdAt  DateTime         @default(now())
+}
+
+// ==================== 宾客选菜关联 ====================
+model GuestSelection {
+  id        Int           @id @default(autoincrement())
+  guestId   Int
+  poolDishId Int
+  
+  guest     PartyGuest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  poolDish  PartyDishPool @relation(fields: [poolDishId], references: [id], onDelete: Cascade)
+
+  @@unique([guestId, poolDishId]) // 同一宾客对同一菜品只能选一次
 }

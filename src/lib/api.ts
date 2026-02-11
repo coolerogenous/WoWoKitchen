@@ -116,14 +116,24 @@ export const menuApi = {
         request<{ id: number }>(`/api/menus/${id}`, { method: "DELETE" }),
 };
 
-// ==================== 密语 ====================
-export const tokenApi = {
-    encode: (type: "dish" | "menu", id: number) =>
-        request<{ token: string }>("/api/tokens/encode", {
+// ==================== 分享码 (Share Token) ====================
+export const shareApi = {
+    create: (type: "DISH" | "MENU" | "PARTY", refId: number) =>
+        request<{ code: string; type: string; refId: number }>("/api/share/create", {
             method: "POST",
-            body: JSON.stringify({ type, id }),
+            body: JSON.stringify({ type, refId }),
         }),
 
+    get: (code: string) =>
+        request<{
+            type: "DISH" | "MENU" | "PARTY";
+            id?: number; // for PARTY
+            data?: any; // for DISH/MENU import data
+        }>(`/api/share/${code}`),
+};
+
+// ==================== 密语 (Legacy / Internal Import) ====================
+export const tokenApi = {
     decode: (token: string) =>
         request<{
             ingredientsCreated: number;
@@ -135,6 +145,18 @@ export const tokenApi = {
             method: "POST",
             body: JSON.stringify({ token }),
         }),
+
+    importData: (data: any) =>
+        request<{
+            ingredientsCreated: number;
+            ingredientsReused: number;
+            dishesCreated: number;
+            menuCreated: boolean;
+            menuName: string;
+        }>("/api/tokens/decode", {
+            method: "POST",
+            body: JSON.stringify({ data }),
+        }),
 };
 
 // ==================== 饭局 ====================
@@ -143,7 +165,7 @@ export const partyApi = {
 
     get: (id: string | number) => request<PartyDetail>(`/api/parties/${id}`),
 
-    create: (data: { name: string; dishIds?: number[] }) =>
+    create: (data: { name: string }) =>
         request<Party>("/api/parties", {
             method: "POST",
             body: JSON.stringify(data),
@@ -153,30 +175,30 @@ export const partyApi = {
         request<{ id: number }>(`/api/parties/${id}`, { method: "DELETE" }),
 
     join: (id: string | number, nickname: string) =>
-        request<{ guestId: number; guestToken: string; nickname: string }>(
+        request<{ guestId: number; guestToken: string; nickname: string; partyId: number }>(
             `/api/parties/${id}/join`,
             { method: "POST", body: JSON.stringify({ nickname }) }
         ),
 
-    addDish: (
-        id: number,
-        data:
-            | { dishId: number }
-            | {
-                dishName: string;
-                ingredients: { name: string; quantity: number; unit: string; unitPrice: number }[];
-                guestToken: string;
-            }
-    ) =>
-        request(`/api/parties/${id}/dishes`, {
+    // Host: Add Dish/Menu to Pool
+    addToPool: (id: number, data: { dishId?: number; menuId?: number }) =>
+        request(`/api/parties/${id}/pool`, {
             method: "POST",
             body: JSON.stringify(data),
         }),
 
-    removeDish: (id: number, partyDishId: number) =>
-        request(`/api/parties/${id}/dishes`, {
+    // Host: Remove from Pool
+    removeFromPool: (id: number, poolDishId: number) =>
+        request(`/api/parties/${id}/pool`, {
             method: "DELETE",
-            body: JSON.stringify({ partyDishId }),
+            body: JSON.stringify({ poolDishId }),
+        }),
+
+    // Guest: Select/Unselect
+    selectDish: (partyId: number, guestToken: string, poolDishId: number, action: "select" | "unselect") =>
+        request(`/api/parties/${partyId}/select`, {
+            method: "POST",
+            body: JSON.stringify({ guestToken, poolDishId, action }),
         }),
 
     lock: (id: number, action: "lock" | "unlock") =>
@@ -251,23 +273,21 @@ export interface Party {
     status: string;
     shareCode: string;
     createdAt: string;
-    dishes: PartyDishItem[];
-    guests: { id: number; nickname: string }[];
-    _count?: { dishes: number; guests: number };
+    // poolDishes: now in PartyDetail primarily, but listed here for list view counts
+    _count?: { poolDishes: number; guests: number };
 }
 
-export interface PartyDishItem {
+export interface PartyDishPoolItem {
     id: number;
     dishName: string;
-    ingredientsSnapshot: string;
     costSnapshot: number;
-    addedByGuest?: { id: number; nickname: string } | null;
-    createdAt: string;
+    selections: { guest: { id: number; nickname: string } }[];
 }
 
 export interface PartyDetail extends Party {
     host: { id: number; username: string };
-    totalCost: number;
+    poolDishes: PartyDishPoolItem[];
+    guests: { id: number; nickname: string; guestToken?: string }[];
 }
 
 export interface PartyExport {
@@ -276,7 +296,7 @@ export interface PartyExport {
     status: string;
     guestCount: number;
     guests: string[];
-    dishes: { name: string; cost: number; addedBy: string }[];
+    dishes: { name: string; cost: number; selectedBy: string[] }[];
     shoppingList: {
         items: ShoppingListItem[];
         totalCost: number;

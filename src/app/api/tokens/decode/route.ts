@@ -39,26 +39,29 @@ export async function POST(req: NextRequest) {
         }
 
         const body = await req.json();
-        const { token } = body;
+        const { token, data } = body;
 
-        if (!token || !token.startsWith("WK:")) {
-            return NextResponse.json(
-                { success: false, error: "无效的密语格式" },
-                { status: 400 }
-            );
-        }
-
-        // Base64 解码 → 解压 → 反序列化
-        const base64Data = token.slice(3);
         let payload: TokenPayload;
 
-        try {
-            const compressed = Buffer.from(base64Data, "base64");
-            const jsonStr = zlib.inflateSync(compressed).toString("utf-8");
-            payload = JSON.parse(jsonStr);
-        } catch {
+        if (data) {
+            // 直接使用传入的数据
+            payload = data;
+        } else if (token && token.startsWith("WK:")) {
+            // Base64 解码 → 解压 → 反序列化
+            const base64Data = token.slice(3);
+            try {
+                const compressed = Buffer.from(base64Data, "base64");
+                const jsonStr = zlib.inflateSync(compressed).toString("utf-8");
+                payload = JSON.parse(jsonStr);
+            } catch {
+                return NextResponse.json(
+                    { success: false, error: "密语解析失败，数据可能已损坏" },
+                    { status: 400 }
+                );
+            }
+        } else {
             return NextResponse.json(
-                { success: false, error: "密语解析失败，数据可能已损坏" },
+                { success: false, error: "无效的请求参数" },
                 { status: 400 }
             );
         }

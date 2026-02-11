@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import crypto from "crypto";
+import { v4 as uuidv4 } from "uuid";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 /**
- * POST /api/parties/[id]/join - 游客加入饭局
- * body: { nickname: string }
- * 无需登录
+ * POST /api/parties/[id]/join - 访客加入
+ * body: { nickname }
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
     try {
@@ -15,61 +14,39 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         const body = await req.json();
         const { nickname } = body;
 
+        // 支持 ID 或 ShareCode
+        let partyId = Number(id);
+        if (isNaN(partyId)) {
+            const p = await prisma.party.findUnique({ where: { shareCode: id } });
+            if (!p) return NextResponse.json({ success: false, error: "无效的饭局代码" }, { status: 404 });
+            partyId = p.id;
+        }
+
         if (!nickname) {
-            return NextResponse.json(
-                { success: false, error: "昵称不能为空" },
-                { status: 400 }
-            );
+            return NextResponse.json({ success: false, error: "昵称不能为空" }, { status: 400 });
         }
 
-        // 查找饭局
-        const party = await prisma.party.findFirst({
-            where: isNaN(Number(id))
-                ? { shareCode: id }
-                : { id: Number(id) },
-        });
-
-        if (!party) {
-            return NextResponse.json(
-                { success: false, error: "饭局不存在" },
-                { status: 404 }
-            );
-        }
-
-        if (party.status === "LOCKED") {
-            return NextResponse.json(
-                { success: false, error: "饭局已锁定，无法加入" },
-                { status: 403 }
-            );
-        }
-
-        // 生成游客 token
-        const guestToken = crypto.randomBytes(8).toString("hex");
-
+        const guestToken = uuidv4();
         const guest = await prisma.partyGuest.create({
             data: {
-                partyId: party.id,
+                partyId,
                 nickname,
-                guestToken,
-            },
+                guestToken
+            }
         });
 
-        return NextResponse.json(
-            {
-                success: true,
-                data: {
-                    guestId: guest.id,
-                    guestToken: guest.guestToken,
-                    nickname: guest.nickname,
-                },
-            },
-            { status: 201 }
-        );
+        return NextResponse.json({
+            success: true,
+            data: {
+                guestId: guest.id,
+                guestToken,
+                nickname,
+                partyId
+            }
+        });
+
     } catch (error) {
         console.error("加入饭局失败:", error);
-        return NextResponse.json(
-            { success: false, error: "加入饭局失败" },
-            { status: 500 }
-        );
+        return NextResponse.json({ success: false, error: "加入失败" }, { status: 500 });
     }
 }

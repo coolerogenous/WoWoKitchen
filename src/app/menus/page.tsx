@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthContext";
-import { menuApi, dishApi, tokenApi, Menu, Dish, ShoppingListItem } from "@/lib/api";
+import { menuApi, dishApi, shareApi, Menu, Dish, ShoppingListItem } from "@/lib/api";
 
 export default function MenusPage() {
     const { user, isLoading } = useAuth();
@@ -19,7 +19,7 @@ export default function MenusPage() {
         menu: Menu;
         shoppingList: { items: ShoppingListItem[]; totalCost: number };
     } | null>(null);
-    const [tokenStr, setTokenStr] = useState("");
+    const [shareCode, setShareCode] = useState("");
 
     useEffect(() => {
         if (!isLoading && !user) { router.replace("/"); return; }
@@ -70,12 +70,12 @@ export default function MenusPage() {
         }
     };
 
-    const handleExportToken = async (id: number) => {
-        const res = await tokenApi.encode("menu", id);
+    const handleShare = async (id: number) => {
+        const res = await shareApi.create("MENU", id);
         if (res.success && res.data) {
-            setTokenStr(res.data.token);
+            setShareCode(res.data.code);
         } else {
-            alert(res.error || "导出失败");
+            if (res.error) alert(res.error);
         }
     };
 
@@ -132,18 +132,21 @@ export default function MenusPage() {
             )}
 
             {/* 密语显示 */}
-            {tokenStr && (
+            {shareCode && (
                 <div style={styles.tokenDisplay}>
                     <div style={styles.tokenHeader}>
-                        <strong>📋 菜单密语</strong>
-                        <button style={styles.closeBtn} onClick={() => setTokenStr("")}>✕</button>
+                        <strong>🔐 菜单分享码</strong>
+                        <button style={styles.closeBtn} onClick={() => setShareCode("")}>✕</button>
                     </div>
-                    <textarea readOnly value={tokenStr} style={styles.tokenTextarea} onClick={(e) => (e.target as HTMLTextAreaElement).select()} />
+                    <div style={styles.codeText}>{shareCode}</div>
+                    <div style={{ fontSize: 12, color: '#666', marginTop: 5, textAlign: 'center' }}>
+                        将此 6 位码分享给朋友，在“发现”页输入即可导入。
+                    </div>
                     <button
                         style={styles.copyBtn}
-                        onClick={() => { navigator.clipboard.writeText(tokenStr); alert("已复制到剪贴板！"); }}
+                        onClick={() => { navigator.clipboard.writeText(shareCode); alert("已复制！"); }}
                     >
-                        📋 复制密语
+                        📋 复制分享码
                     </button>
                 </div>
             )}
@@ -208,7 +211,7 @@ export default function MenusPage() {
                                     <button style={styles.viewBtn} onClick={() => handleViewDetail(menu.id)}>
                                         🛒 采购清单
                                     </button>
-                                    <button style={styles.viewBtn} onClick={() => handleExportToken(menu.id)}>
+                                    <button style={styles.viewBtn} onClick={() => handleShare(menu.id)}>
                                         🔐 生成密语
                                     </button>
                                     <button style={styles.editBtn} onClick={() => handleEdit(menu)}>编辑</button>
@@ -277,19 +280,18 @@ const styles: Record<string, React.CSSProperties> = {
     empty: { padding: 40, textAlign: "center", color: "#aaa", gridColumn: "1 / -1" },
     tokenDisplay: {
         background: "#fff", borderRadius: 10, padding: 20,
-        boxShadow: "0 1px 6px rgba(0,0,0,0.06)", marginBottom: 20,
+        boxShadow: "0 1px 6px rgba(0,0,0,0.06)", marginBottom: 20, textAlign: 'center'
     },
-    tokenHeader: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+    tokenHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
     closeBtn: {
         background: "transparent", border: "none", fontSize: 18, cursor: "pointer", color: "#888",
     },
-    tokenTextarea: {
-        width: "100%", height: 80, marginTop: 10, padding: 10, border: "1px solid #ddd",
-        borderRadius: 6, fontSize: 12, fontFamily: "monospace", resize: "none",
+    codeText: {
+        fontSize: 32, fontWeight: 700, letterSpacing: 4, color: "#2c3e50", margin: "10px 0", fontFamily: "monospace"
     },
     copyBtn: {
-        marginTop: 8, padding: "6px 16px", border: "none", borderRadius: 6,
-        backgroundColor: "#27ae60", color: "#fff", cursor: "pointer", fontSize: 13,
+        marginTop: 15, padding: "8px 24px", border: "none", borderRadius: 6,
+        backgroundColor: "#27ae60", color: "#fff", cursor: "pointer", fontSize: 14,
     },
     modal: {
         position: "fixed", top: 0, left: 0, right: 0, bottom: 0,

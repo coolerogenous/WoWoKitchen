@@ -16,9 +16,9 @@ export async function GET(req: NextRequest) {
         const parties = await prisma.party.findMany({
             where: { hostId: userId },
             include: {
-                dishes: true,
+                poolDishes: true,
                 guests: { select: { id: true, nickname: true } },
-                _count: { select: { dishes: true, guests: true } },
+                _count: { select: { poolDishes: true, guests: true } },
             },
             orderBy: { createdAt: "desc" },
         });
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/parties - 创建饭局
- * body: { name, dishIds?: number[] }
+ * body: { name }
  */
 export async function POST(req: NextRequest) {
     try {
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
         }
 
         const body = await req.json();
-        const { name, dishIds } = body;
+        const { name } = body;
 
         if (!name) {
             return NextResponse.json(
@@ -54,34 +54,14 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const shareCode = crypto.randomBytes(4).toString("hex").toUpperCase();
-
-        let dishSnapshots: {
-            dishName: string;
-            ingredientsSnapshot: string;
-            costSnapshot: number;
-        }[] = [];
-
-        if (dishIds && dishIds.length > 0) {
-            const dishes = await prisma.dish.findMany({
-                where: { id: { in: dishIds }, userId },
-                include: {
-                    ingredients: { include: { ingredient: true } },
-                },
-            });
-
-            dishSnapshots = dishes.map((dish) => ({
-                dishName: dish.name,
-                ingredientsSnapshot: JSON.stringify(
-                    dish.ingredients.map((di) => ({
-                        name: di.ingredient.name,
-                        quantity: di.quantity,
-                        unit: di.unit,
-                        unitPrice: di.ingredient.unitPrice,
-                    }))
-                ),
-                costSnapshot: dish.estimatedCost,
-            }));
+        // 生成不重复的 6 位分享码
+        let shareCode = "";
+        let attempts = 0;
+        while (attempts < 10) {
+            shareCode = crypto.randomBytes(3).toString("hex").toUpperCase();
+            const conflict = await prisma.party.findUnique({ where: { shareCode } });
+            if (!conflict) break;
+            attempts++;
         }
 
         const party = await prisma.party.create({
@@ -89,9 +69,7 @@ export async function POST(req: NextRequest) {
                 name,
                 shareCode,
                 hostId: userId,
-                dishes: { create: dishSnapshots },
             },
-            include: { dishes: true, guests: true },
         });
 
         return NextResponse.json({ success: true, data: party }, { status: 201 });

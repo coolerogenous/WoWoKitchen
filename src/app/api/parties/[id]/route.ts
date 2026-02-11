@@ -6,24 +6,48 @@ type RouteParams = { params: Promise<{ id: string }> };
 
 /**
  * GET /api/parties/[id] - 获取饭局详情
- * 支持通过 id 或 shareCode 查询（无需登录）
+ * 支持通过 id 或 shareCode 查询
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
     try {
         const { id } = await params;
+        const isId = !isNaN(Number(id));
 
-        const party = await prisma.party.findFirst({
-            where: isNaN(Number(id)) ? { shareCode: id } : { id: Number(id) },
+        // 如果通过 shareCode 查询，需要先找到 ID
+        let partyId: number;
+        if (isId) {
+            partyId = Number(id);
+        } else {
+            const p = await prisma.party.findUnique({ where: { shareCode: id as string } });
+            if (!p) return NextResponse.json({ success: false, error: "饭局不存在" }, { status: 404 });
+            partyId = p.id;
+        }
+
+        // 获取当前用户（可能是 Host 或 Guest）以决定返回什么数据
+        // 但鉴于需求，Host 和 Guest 看到的信息基本一致（Guest 也能看到谁选了什么）
+        // 所以统一返回完整信息，前端负责展示差异
+
+        const party = await prisma.party.findUnique({
+            where: { id: partyId },
             include: {
                 host: { select: { id: true, username: true } },
-                dishes: {
+                poolDishes: {
                     include: {
-                        addedByGuest: { select: { id: true, nickname: true } },
+                        selections: {
+                            include: {
+                                guest: { select: { id: true, nickname: true } },
+                            },
+                        },
                     },
                     orderBy: { createdAt: "asc" },
                 },
                 guests: {
-                    select: { id: true, nickname: true, createdAt: true },
+                    select: { id: true, nickname: true, guestToken: true }, // 注意：guestToken 应该脱敏吗？
+                    // Guest 需要知道自己的 token，但不能知道别人的。
+                    // 这里简单处理：API 不脱敏，但在前端只存储自己的。
+                    // 安全起见，应该只有 Auth 的 Host 能看到所有 token? 
+                    // 或者 Guest join 时返回 token，这里不返回。
+                    // 修正：这里不返回 guestToken，只返回基本信息。
                 },
             },
         });
@@ -35,15 +59,21 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
             );
         }
 
-        const totalCost = party.dishes.reduce(
-            (sum, dish) => sum + dish.costSnapshot,
-            0
-        );
+        // 计算统计数据
+        // 1. 菜品池总成本 (Host 采购预算参考，如果全买的话)
+        // 2. 实际被选菜品总成本 (Purchase List)
 
-        return NextResponse.json({
-            success: true,
-            data: { ...party, totalCost: Math.round(totalCost * 100) / 100 },
-        });
+        // 这里只看"被选中的菜品"的成本累加吗？
+        // 需求：发起人可以导出菜品清单详情以方便购买食材
+        // 这意味着"采购清单"是基于"被选中的菜品"生成的。
+
+        // 我们返回给前端用于展示的数据：
+        const data = {
+            ...party,
+            guests: party.guests.map(g => ({ id: g.id, nickname: g.nickname })), // 脱敏 guestToken
+        };
+
+        return NextResponse.json({ success: true, data });
     } catch (error) {
         console.error("获取饭局详情失败:", error);
         return NextResponse.json(

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthContext";
-import { dishApi, ingredientApi, Dish, Ingredient } from "@/lib/api";
+import { dishApi, ingredientApi, shareApi, Dish, Ingredient } from "@/lib/api";
 
 export default function DishesPage() {
     const { user, isLoading } = useAuth();
@@ -17,6 +17,7 @@ export default function DishesPage() {
         { ingredientId: number; quantity: string; unit: string }[]
     >([]);
     const [error, setError] = useState("");
+    const [shareCode, setShareCode] = useState("");
 
     useEffect(() => {
         if (!isLoading && !user) { router.replace("/"); return; }
@@ -99,6 +100,15 @@ export default function DishesPage() {
         else alert(res.error || "删除失败");
     };
 
+    const handleShare = async (id: number) => {
+        const res = await shareApi.create("DISH", id);
+        if (res.success && res.data) {
+            setShareCode(res.data.code);
+        } else {
+            if (res.error) alert(res.error);
+        }
+    };
+
     if (isLoading || !user) return null;
 
     return (
@@ -177,6 +187,26 @@ export default function DishesPage() {
                 </form>
             )}
 
+            {/* 密语显示 */}
+            {shareCode && (
+                <div style={styles.tokenDisplay}>
+                    <div style={styles.tokenHeader}>
+                        <strong>🔐 菜品分享码</strong>
+                        <button style={styles.closeBtn} onClick={() => setShareCode("")}>✕</button>
+                    </div>
+                    <div style={styles.codeText}>{shareCode}</div>
+                    <div style={{ fontSize: 12, color: '#666', marginTop: 5, textAlign: 'center' }}>
+                        将分享码给朋友，在“发现”页与你共享美味。
+                    </div>
+                    <button
+                        style={styles.copyBtn}
+                        onClick={() => { navigator.clipboard.writeText(shareCode); alert("已复制！"); }}
+                    >
+                        📋 复制分享码
+                    </button>
+                </div>
+            )}
+
             <div style={styles.dishGrid}>
                 {dishes.length === 0 ? (
                     <div style={styles.empty}>暂无菜品</div>
@@ -195,6 +225,9 @@ export default function DishesPage() {
                                 ))}
                             </div>
                             <div style={styles.cardActions}>
+                                <button style={styles.viewBtn} onClick={() => handleShare(dish.id)}>
+                                    🔐 生成密语
+                                </button>
                                 <button style={styles.editBtn} onClick={() => handleEdit(dish)}>编辑</button>
                                 <button style={styles.deleteBtn} onClick={() => handleDelete(dish.id)}>删除</button>
                             </div>
@@ -263,7 +296,11 @@ const styles: Record<string, React.CSSProperties> = {
     ingTag: {
         background: "#f0f0f0", padding: "3px 10px", borderRadius: 12, fontSize: 12, color: "#555",
     },
-    cardActions: { display: "flex", gap: 6, marginTop: 12 },
+    cardActions: { display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" },
+    viewBtn: {
+        padding: "4px 12px", border: "1px solid #27ae60", borderRadius: 4,
+        background: "transparent", color: "#27ae60", cursor: "pointer", fontSize: 13,
+    },
     editBtn: {
         padding: "4px 12px", border: "1px solid #3498db", borderRadius: 4,
         background: "transparent", color: "#3498db", cursor: "pointer", fontSize: 13,
@@ -273,4 +310,19 @@ const styles: Record<string, React.CSSProperties> = {
         background: "transparent", color: "#e74c3c", cursor: "pointer", fontSize: 13,
     },
     empty: { padding: 40, textAlign: "center", color: "#aaa", gridColumn: "1 / -1" },
+    tokenDisplay: {
+        background: "#fff", borderRadius: 10, padding: 20,
+        boxShadow: "0 1px 6px rgba(0,0,0,0.06)", marginBottom: 20, textAlign: 'center'
+    },
+    tokenHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+    closeBtn: {
+        background: "transparent", border: "none", fontSize: 18, cursor: "pointer", color: "#888",
+    },
+    codeText: {
+        fontSize: 32, fontWeight: 700, letterSpacing: 4, color: "#2c3e50", margin: "10px 0", fontFamily: "monospace"
+    },
+    copyBtn: {
+        marginTop: 15, padding: "8px 24px", border: "none", borderRadius: 6,
+        backgroundColor: "#27ae60", color: "#fff", cursor: "pointer", fontSize: 14,
+    },
 };
