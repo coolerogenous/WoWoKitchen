@@ -18,6 +18,8 @@ router.put('/dish/:dishId/servings', auth, partyController.updateDishServings);
 router.get('/join/:code', optionalAuth, partyController.getByShareCode);
 router.post('/join/:code/guest', partyController.joinAsGuest);
 router.post('/join/:code/add-dish', optionalAuth, partyController.addDish);
+router.delete('/join/:code/dish/:dishId', optionalAuth, partyController.removeDishByCode);
+router.put('/join/:code/dish/:dishId/servings', optionalAuth, partyController.updateDishServingsByCode);
 router.get('/join/:code/shopping-list', optionalAuth, partyController.getShoppingList);
 
 module.exports = router;

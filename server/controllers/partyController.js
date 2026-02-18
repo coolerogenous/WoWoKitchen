@@ -129,8 +129,9 @@ exports.getByShareCode = async (req, res) => {
         // 如果有 available_dish_ids，拉取可点菜品的完整信息
         let availableDishes = [];
         if (party.available_dish_ids && party.available_dish_ids.length > 0) {
+            const ids = party.available_dish_ids.map(Number);
             availableDishes = await Dish.findAll({
-                where: { id: party.available_dish_ids },
+                where: { id: ids },
                 attributes: ['id', 'name', 'estimated_cost'],
             });
         }
@@ -179,9 +180,10 @@ exports.addDish = async (req, res) => {
             return res.status(403).json({ message: '饭局已锁定，无法修改' });
         }
 
-        // 检查是否在可选菜品范围内
+        // 检查是否在可选菜品范围内（统一转 int 比较）
         if (party.available_dish_ids && party.available_dish_ids.length > 0) {
-            if (!party.available_dish_ids.includes(dish_id)) {
+            const ids = party.available_dish_ids.map(Number);
+            if (!ids.includes(Number(dish_id))) {
                 return res.status(400).json({ message: '该菜品不在可选范围内' });
             }
         }
@@ -292,6 +294,59 @@ exports.getShoppingList = async (req, res) => {
         res.json({ party_name: party.name, status: party.status, shopping_list: shoppingList });
     } catch (error) {
         console.error('生成采购清单失败:', error);
+        res.status(500).json({ message: '服务器错误' });
+    }
+};
+
+// 游客可删除饭局中的菜品（通过 share_code）
+exports.removeDishByCode = async (req, res) => {
+    try {
+        const party = await Party.findOne({ where: { share_code: req.params.code } });
+        if (!party) {
+            return res.status(404).json({ message: '饭局不存在' });
+        }
+        if (party.status === 'locked') {
+            return res.status(403).json({ message: '饭局已锁定，无法修改' });
+        }
+        const partyDish = await PartyDish.findOne({
+            where: { id: req.params.dishId, party_id: party.id },
+        });
+        if (!partyDish) {
+            return res.status(404).json({ message: '菜品记录不存在' });
+        }
+        await partyDish.destroy();
+        const budget = await calculationEngine.calculatePartyBudget(party.id);
+        await party.update({ total_budget: budget });
+        res.json({ message: '菜品已移除', total_budget: budget });
+    } catch (error) {
+        console.error('移除菜品失败:', error);
+        res.status(500).json({ message: '服务器错误' });
+    }
+};
+
+// 游客可修改饭局中菜品份数（通过 share_code）
+exports.updateDishServingsByCode = async (req, res) => {
+    try {
+        const { servings } = req.body;
+        const party = await Party.findOne({ where: { share_code: req.params.code } });
+        if (!party) {
+            return res.status(404).json({ message: '饭局不存在' });
+        }
+        if (party.status === 'locked') {
+            return res.status(403).json({ message: '饭局已锁定，无法修改' });
+        }
+        const partyDish = await PartyDish.findOne({
+            where: { id: req.params.dishId, party_id: party.id },
+        });
+        if (!partyDish) {
+            return res.status(404).json({ message: '菜品记录不存在' });
+        }
+        await partyDish.update({ servings: parseInt(servings) || 1 });
+        const budget = await calculationEngine.calculatePartyBudget(party.id);
+        await party.update({ total_budget: budget });
+        res.json({ message: '份数已更新', total_budget: budget });
+    } catch (error) {
+        console.error('修改份数失败:', error);
         res.status(500).json({ message: '服务器错误' });
     }
 };

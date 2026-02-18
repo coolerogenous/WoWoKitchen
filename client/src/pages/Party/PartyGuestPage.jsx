@@ -77,6 +77,30 @@ export default function PartyGuestPage() {
         } catch (err) { showToastMsg(err.message); }
     };
 
+    // 删除菜品
+    const handleRemoveDish = async (partyDishId) => {
+        try {
+            await apiFetch(`/parties/join/${code}/dish/${partyDishId}`, { method: 'DELETE' });
+            showToastMsg('已移除');
+            fetchParty();
+        } catch (err) { showToastMsg(err.message); }
+    };
+
+    // 修改份数
+    const handleChangeServings = async (partyDishId, newServings) => {
+        if (newServings < 1) {
+            handleRemoveDish(partyDishId);
+            return;
+        }
+        try {
+            await apiFetch(`/parties/join/${code}/dish/${partyDishId}/servings`, {
+                method: 'PUT',
+                body: JSON.stringify({ servings: newServings }),
+            });
+            fetchParty();
+        } catch (err) { showToastMsg(err.message); }
+    };
+
     const viewShoppingList = async () => {
         try {
             const data = await apiFetch(`/parties/join/${code}/shopping-list`);
@@ -166,8 +190,26 @@ export default function PartyGuestPage() {
                                     <div style={{ fontWeight: 500 }}>{pd.dish?.name}</div>
                                     <div style={{ fontSize: 12, color: '#999' }}>by {pd.added_by}</div>
                                 </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <span style={{ fontWeight: 600, fontSize: 16 }}>× {pd.servings}</span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    {joined && party.status === 'active' ? (
+                                        <>
+                                            <button onClick={() => handleChangeServings(pd.id, pd.servings - 1)}
+                                                style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #e0e0e0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <Minus size={14} color="#888" />
+                                            </button>
+                                            <span style={{ fontWeight: 600, fontSize: 16, minWidth: 24, textAlign: 'center' }}>{pd.servings}</span>
+                                            <button onClick={() => handleChangeServings(pd.id, pd.servings + 1)}
+                                                style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #e0e0e0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <Plus size={14} color="#667eea" />
+                                            </button>
+                                            <button onClick={() => handleRemoveDish(pd.id)}
+                                                style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #fdd', background: '#fff5f5', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: 4 }}>
+                                                <X size={14} color="#e74c3c" />
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <span style={{ fontWeight: 600, fontSize: 16 }}>× {pd.servings}</span>
+                                    )}
                                 </div>
                             </div>
                         ))
