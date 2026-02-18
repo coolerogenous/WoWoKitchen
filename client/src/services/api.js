@@ -80,9 +80,13 @@ export const tokenAPI = {
 export const partyAPI = {
     create: (data) => api.post('/parties', data),
     getMyParties: () => api.get('/parties/my'),
+    update: (id, data) => api.put(`/parties/${id}`, data),
+    delete: (id) => api.delete(`/parties/${id}`),
     getByShareCode: (code) => api.get(`/parties/join/${code}`),
     joinAsGuest: (code, data) => api.post(`/parties/join/${code}/guest`, data),
     addDish: (code, data) => api.post(`/parties/join/${code}/add-dish`, data),
+    removeDish: (dishId) => api.delete(`/parties/dish/${dishId}`),
+    updateDishServings: (dishId, servings) => api.put(`/parties/dish/${dishId}/servings`, { servings }),
     getShoppingList: (code) => api.get(`/parties/join/${code}/shopping-list`),
     toggleLock: (id) => api.put(`/parties/${id}/toggle-lock`),
 };

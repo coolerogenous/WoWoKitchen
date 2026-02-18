@@ -33,7 +33,6 @@ exports.create = async (req, res) => {
             }
         }
 
-        // 计算初始预算
         const budget = await calculationEngine.calculatePartyBudget(party.id);
         await party.update({ total_budget: budget });
 
@@ -51,12 +50,54 @@ exports.getMyParties = async (req, res) => {
             where: { host_id: req.user.id },
             include: [
                 { model: PartyGuest, as: 'guests' },
+                {
+                    model: PartyDish,
+                    as: 'partyDishes',
+                    include: [{ model: Dish, as: 'dish' }],
+                },
             ],
             order: [['created_at', 'DESC']],
         });
         res.json({ parties });
     } catch (error) {
         console.error('获取饭局列表失败:', error);
+        res.status(500).json({ message: '服务器错误' });
+    }
+};
+
+// 更新饭局信息
+exports.update = async (req, res) => {
+    try {
+        const party = await Party.findOne({
+            where: { id: req.params.id, host_id: req.user.id },
+        });
+        if (!party) {
+            return res.status(404).json({ message: '饭局不存在或无权操作' });
+        }
+        const { name } = req.body;
+        if (name) await party.update({ name });
+        res.json({ message: '更新成功', party });
+    } catch (error) {
+        console.error('更新饭局失败:', error);
+        res.status(500).json({ message: '服务器错误' });
+    }
+};
+
+// 删除饭局
+exports.delete = async (req, res) => {
+    try {
+        const party = await Party.findOne({
+            where: { id: req.params.id, host_id: req.user.id },
+        });
+        if (!party) {
+            return res.status(404).json({ message: '饭局不存在或无权操作' });
+        }
+        await PartyDish.destroy({ where: { party_id: party.id } });
+        await PartyGuest.destroy({ where: { party_id: party.id } });
+        await party.destroy();
+        res.json({ message: '饭局已删除' });
+    } catch (error) {
+        console.error('删除饭局失败:', error);
         res.status(500).json({ message: '服务器错误' });
     }
 };
@@ -100,7 +141,6 @@ exports.joinAsGuest = async (req, res) => {
         if (!nickname) {
             return res.status(400).json({ message: '请输入昵称' });
         }
-
         const party = await Party.findOne({ where: { share_code: req.params.code } });
         if (!party) {
             return res.status(404).json({ message: '饭局不存在' });
@@ -108,14 +148,12 @@ exports.joinAsGuest = async (req, res) => {
         if (party.status === 'locked') {
             return res.status(403).json({ message: '饭局已锁定，无法加入' });
         }
-
         const guest_token = crypto.randomBytes(16).toString('hex');
         const guest = await PartyGuest.create({
             party_id: party.id,
             nickname,
             guest_token,
         });
-
         res.status(201).json({ message: '加入成功', guest_token, guest });
     } catch (error) {
         console.error('加入饭局失败:', error);
@@ -142,13 +180,65 @@ exports.addDish = async (req, res) => {
             servings: servings || 1,
         });
 
-        // 重新计算预算
         const budget = await calculationEngine.calculatePartyBudget(party.id);
         await party.update({ total_budget: budget });
 
         res.status(201).json({ message: '菜品已添加', total_budget: budget });
     } catch (error) {
         console.error('添加菜品失败:', error);
+        res.status(500).json({ message: '服务器错误' });
+    }
+};
+
+// 删除饭局中的菜品
+exports.removeDish = async (req, res) => {
+    try {
+        const partyDish = await PartyDish.findByPk(req.params.dishId);
+        if (!partyDish) {
+            return res.status(404).json({ message: '菜品记录不存在' });
+        }
+        const party = await Party.findByPk(partyDish.party_id);
+        if (!party) {
+            return res.status(404).json({ message: '饭局不存在' });
+        }
+        if (party.status === 'locked') {
+            return res.status(403).json({ message: '饭局已锁定，无法修改' });
+        }
+        await partyDish.destroy();
+
+        const budget = await calculationEngine.calculatePartyBudget(party.id);
+        await party.update({ total_budget: budget });
+
+        res.json({ message: '菜品已移除', total_budget: budget });
+    } catch (error) {
+        console.error('移除菜品失败:', error);
+        res.status(500).json({ message: '服务器错误' });
+    }
+};
+
+// 修改饭局中菜品的份数
+exports.updateDishServings = async (req, res) => {
+    try {
+        const { servings } = req.body;
+        const partyDish = await PartyDish.findByPk(req.params.dishId);
+        if (!partyDish) {
+            return res.status(404).json({ message: '菜品记录不存在' });
+        }
+        const party = await Party.findByPk(partyDish.party_id);
+        if (!party) {
+            return res.status(404).json({ message: '饭局不存在' });
+        }
+        if (party.status === 'locked') {
+            return res.status(403).json({ message: '饭局已锁定，无法修改' });
+        }
+        await partyDish.update({ servings: parseInt(servings) || 1 });
+
+        const budget = await calculationEngine.calculatePartyBudget(party.id);
+        await party.update({ total_budget: budget });
+
+        res.json({ message: '份数已更新', total_budget: budget });
+    } catch (error) {
+        console.error('修改份数失败:', error);
         res.status(500).json({ message: '服务器错误' });
     }
 };
@@ -162,10 +252,8 @@ exports.toggleLock = async (req, res) => {
         if (!party) {
             return res.status(404).json({ message: '饭局不存在或无权操作' });
         }
-
         const newStatus = party.status === 'active' ? 'locked' : 'active';
         await party.update({ status: newStatus });
-
         res.json({ message: newStatus === 'locked' ? '饭局已锁定' : '饭局已解锁', status: newStatus });
     } catch (error) {
         console.error('切换饭局状态失败:', error);
@@ -180,7 +268,6 @@ exports.getShoppingList = async (req, res) => {
         if (!party) {
             return res.status(404).json({ message: '饭局不存在' });
         }
-
         const shoppingList = await calculationEngine.generatePartyShoppingList(party.id);
         res.json({ party_name: party.name, status: party.status, shopping_list: shoppingList });
     } catch (error) {
