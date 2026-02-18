@@ -1,6 +1,12 @@
 const crypto = require('crypto');
 const { Token, Dish, DishIngredient, Ingredient, Menu, MenuDish } = require('../models');
 
+// 根据内容生成确定性的密语码（同一内容始终生成同一码）
+function generateDeterministicCode(type, data) {
+    const hash = crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
+    return (type.charAt(0).toUpperCase() + hash.substring(0, 7)).toUpperCase();
+}
+
 // 生成密语 - 导出菜品
 exports.exportDish = async (req, res) => {
     try {
@@ -16,7 +22,6 @@ exports.exportDish = async (req, res) => {
             return res.status(404).json({ message: '菜品不存在' });
         }
 
-        // 序列化数据
         const data = {
             dish: {
                 name: dish.name,
@@ -32,14 +37,20 @@ exports.exportDish = async (req, res) => {
             },
         };
 
-        const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+        const code = generateDeterministicCode('D', data);
 
-        await Token.create({
-            user_id: req.user.id,
-            code,
-            type: 'dish',
-            data: JSON.stringify(data),
-        });
+        // 查找是否已有同码的 token，有则更新数据，无则创建
+        const existing = await Token.findOne({ where: { code } });
+        if (existing) {
+            await existing.update({ data: JSON.stringify(data) });
+        } else {
+            await Token.create({
+                user_id: req.user.id,
+                code,
+                type: 'dish',
+                data: JSON.stringify(data),
+            });
+        }
 
         res.json({ message: '密语生成成功', code });
     } catch (error) {
@@ -91,14 +102,19 @@ exports.exportMenu = async (req, res) => {
             },
         };
 
-        const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+        const code = generateDeterministicCode('M', data);
 
-        await Token.create({
-            user_id: req.user.id,
-            code,
-            type: 'menu',
-            data: JSON.stringify(data),
-        });
+        const existing = await Token.findOne({ where: { code } });
+        if (existing) {
+            await existing.update({ data: JSON.stringify(data) });
+        } else {
+            await Token.create({
+                user_id: req.user.id,
+                code,
+                type: 'menu',
+                data: JSON.stringify(data),
+            });
+        }
 
         res.json({ message: '密语生成成功', code });
     } catch (error) {
@@ -141,7 +157,6 @@ async function importDishData(userId, dishData) {
     const ingredientMap = {};
 
     for (const ing of dishData.ingredients) {
-        // 按名称查找本地食材（去重）
         let localIng = await Ingredient.findOne({
             where: { user_id: userId, name: ing.name },
         });
@@ -171,7 +186,6 @@ async function importDishData(userId, dishData) {
     }));
     await DishIngredient.bulkCreate(dishIngredients);
 
-    // 计算成本
     const calculationEngine = require('../services/calculationEngine');
     const cost = await calculationEngine.calculateDishCost(dish.id);
     await dish.update({ estimated_cost: cost });

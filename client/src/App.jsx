@@ -8,6 +8,7 @@ import DishesPage from './pages/Dishes/DishesPage';
 import MenusPage from './pages/Menus/MenusPage';
 import ProfilePage from './pages/Profile/ProfilePage';
 import PartyPage from './pages/Party/PartyPage';
+import PartyGuestPage from './pages/Party/PartyGuestPage';
 import Toast from './components/Toast';
 import './index.css';
 
@@ -21,6 +22,8 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        {/* 游客饭局页面 - 无需登录 */}
+        <Route path="/party/join/:code" element={<PartyGuestPage />} />
         <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
           <Route index element={<HomePage />} />
           <Route path="ingredients" element={<IngredientsPage />} />

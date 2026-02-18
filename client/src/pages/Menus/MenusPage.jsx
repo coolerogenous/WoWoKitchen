@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
-import { Plus, Pencil, Trash2, BookOpen, ShoppingCart, Share2, X, Download } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Pencil, Trash2, BookOpen, ShoppingCart, Share2, X, Image } from 'lucide-react';
 import { menuAPI, dishAPI, tokenAPI } from '../../services/api';
 import { useToastStore } from '../../stores';
+import html2canvas from 'html2canvas';
 
 export default function MenusPage() {
     const [menus, setMenus] = useState([]);
@@ -12,6 +13,8 @@ export default function MenusPage() {
     const [shoppingList, setShoppingList] = useState(null);
     const [editing, setEditing] = useState(null);
     const [form, setForm] = useState({ name: '', description: '', dishes: [] });
+    const [exporting, setExporting] = useState(false);
+    const listRef = useRef(null);
     const showToast = useToastStore((s) => s.showToast);
 
     useEffect(() => { fetchData(); }, []);
@@ -95,10 +98,10 @@ export default function MenusPage() {
         } catch (err) { showToast('删除失败', 'error'); }
     };
 
-    const handleViewList = async (menuId) => {
+    const handleViewList = async (menuId, menuName) => {
         try {
             const res = await menuAPI.getShoppingList(menuId);
-            setShoppingList(res.data);
+            setShoppingList({ ...res.data, _menuName: menuName });
             setShowListModal(true);
         } catch (err) { showToast('生成清单失败', 'error'); }
     };
@@ -109,6 +112,26 @@ export default function MenusPage() {
             showToast(`密语：${res.data.code}（已复制）`, 'success');
             navigator.clipboard?.writeText(res.data.code);
         } catch (err) { showToast('导出失败', 'error'); }
+    };
+
+    const exportListAsImage = async () => {
+        if (!listRef.current || exporting) return;
+        setExporting(true);
+        try {
+            const canvas = await html2canvas(listRef.current, {
+                backgroundColor: '#ffffff',
+                scale: 2,
+                useCORS: true,
+            });
+            const link = document.createElement('a');
+            link.download = `${shoppingList?._menuName || '菜单'}_采购清单.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            showToast('图片已保存 📷', 'success');
+        } catch (err) {
+            showToast('导出失败', 'error');
+        }
+        setExporting(false);
     };
 
     const availableDishes = allDishes.filter(
@@ -146,7 +169,7 @@ export default function MenusPage() {
                                         </div>
                                     </div>
                                     <div style={{ display: 'flex', gap: 'var(--space-xs)', marginTop: 'var(--space-md)', flexWrap: 'wrap' }}>
-                                        <button className="btn btn--sm btn--secondary" onClick={() => handleViewList(menu.id)}>
+                                        <button className="btn btn--sm btn--secondary" onClick={() => handleViewList(menu.id, menu.name)}>
                                             <ShoppingCart size={14} /> 采购清单
                                         </button>
                                         <button className="btn btn--sm btn--secondary" onClick={() => handleExport(menu.id)}>
@@ -232,57 +255,84 @@ export default function MenusPage() {
                 </div>
             )}
 
-            {/* 采购清单弹窗 */}
+            {/* 采购清单弹窗（支持导出图片） */}
             {showListModal && shoppingList && (
                 <div className="modal-overlay" onClick={() => setShowListModal(false)}>
                     <div className="modal-content" onClick={(e) => e.stopPropagation()}>
                         <div className="modal-handle" />
                         <div className="modal-header">
                             <h2>📝 采购清单</h2>
-                            <button className="page-header__action" onClick={() => setShowListModal(false)}><X size={22} /></button>
-                        </div>
-                        <div className="modal-body" id="shopping-list-content">
-                            <h3 style={{ marginBottom: 'var(--space-sm)' }}>{shoppingList.menu_name}</h3>
-
-                            {/* 菜品列表 */}
-                            <div style={{ marginBottom: 'var(--space-md)' }}>
-                                <div className="form-label">菜品</div>
-                                {shoppingList.shopping_list.dishes.map((d, i) => (
-                                    <div key={i} style={{
-                                        display: 'flex', justifyContent: 'space-between', padding: 'var(--space-xs) 0',
-                                        borderBottom: '1px solid var(--border-light)',
-                                    }}>
-                                        <span>{d.name} × {d.servings}</span>
-                                        <span style={{ color: 'var(--color-primary)', fontWeight: 600 }}>¥{d.estimated_cost.toFixed(2)}</span>
-                                    </div>
-                                ))}
+                            <div style={{ display: 'flex', gap: 'var(--space-xs)', alignItems: 'center' }}>
+                                <button className="btn btn--sm btn--primary" onClick={exportListAsImage} disabled={exporting}>
+                                    <Image size={14} /> {exporting ? '导出中...' : '导出图片'}
+                                </button>
+                                <button className="page-header__action" onClick={() => setShowListModal(false)}><X size={22} /></button>
                             </div>
+                        </div>
+                        <div className="modal-body">
+                            {/* 可导出区域 */}
+                            <div ref={listRef} style={{ padding: 'var(--space-md)', background: '#fff' }}>
+                                <div style={{
+                                    textAlign: 'center', fontSize: 'var(--font-size-xl)', fontWeight: 700,
+                                    marginBottom: 'var(--space-sm)', color: '#1a1a2e'
+                                }}>
+                                    🛒 {shoppingList._menuName || shoppingList.menu_name}
+                                </div>
+                                <div style={{
+                                    textAlign: 'center', fontSize: 'var(--font-size-sm)',
+                                    marginBottom: 'var(--space-md)', color: '#666'
+                                }}>
+                                    采购清单 · {new Date().toLocaleDateString('zh-CN')}
+                                </div>
 
-                            {/* 食材汇总 */}
-                            <div style={{ marginBottom: 'var(--space-md)' }}>
-                                <div className="form-label">采购清单（合并同类项）</div>
+                                {/* 菜品列表 */}
+                                <div style={{ marginBottom: 12 }}>
+                                    <div style={{ fontWeight: 600, fontSize: 13, color: '#888', marginBottom: 4 }}>菜品</div>
+                                    {shoppingList.shopping_list.dishes.map((d, i) => (
+                                        <div key={i} style={{
+                                            display: 'flex', justifyContent: 'space-between', padding: '6px 0',
+                                            borderBottom: '1px solid #eee', fontSize: 14
+                                        }}>
+                                            <span style={{ color: '#333' }}>{d.name} × {d.servings}</span>
+                                            <span style={{ color: '#e74c3c', fontWeight: 600 }}>¥{d.estimated_cost.toFixed(2)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* 食材汇总 */}
+                                <div style={{ fontWeight: 600, fontSize: 13, color: '#888', marginBottom: 4 }}>食材汇总</div>
+                                <div style={{
+                                    display: 'flex', justifyContent: 'space-between', padding: '8px 12px',
+                                    background: '#f0f0f5', borderRadius: '8px 8px 0 0', fontWeight: 600, fontSize: 13, color: '#555'
+                                }}>
+                                    <span style={{ flex: 1 }}>食材</span>
+                                    <span style={{ width: 80, textAlign: 'right' }}>数量</span>
+                                    <span style={{ width: 80, textAlign: 'right' }}>金额</span>
+                                </div>
+
                                 {shoppingList.shopping_list.ingredients.map((ing, i) => (
                                     <div key={i} style={{
-                                        display: 'flex', justifyContent: 'space-between', padding: 'var(--space-xs) 0',
-                                        borderBottom: '1px solid var(--border-light)',
+                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                        padding: '10px 12px', borderBottom: '1px solid #eee', fontSize: 14
                                     }}>
-                                        <span>{ing.name}</span>
-                                        <span>
-                                            <b>{ing.total_quantity}{ing.unit}</b>
-                                            <span style={{ color: 'var(--color-primary)', fontWeight: 600, marginLeft: 8 }}>¥{ing.total_price.toFixed(2)}</span>
-                                        </span>
+                                        <span style={{ flex: 1, color: '#333' }}>{ing.name}</span>
+                                        <span style={{ width: 80, textAlign: 'right', color: '#555' }}>{ing.total_quantity}{ing.unit}</span>
+                                        <span style={{ width: 80, textAlign: 'right', color: '#e74c3c', fontWeight: 600 }}>¥{ing.total_price.toFixed(2)}</span>
                                     </div>
                                 ))}
-                            </div>
 
-                            {/* 总计 */}
-                            <div style={{
-                                display: 'flex', justifyContent: 'space-between', padding: 'var(--space-md)',
-                                background: 'var(--color-primary-alpha)', borderRadius: 'var(--radius-md)',
-                                fontWeight: 700, fontSize: 'var(--font-size-lg)',
-                            }}>
-                                <span>总计</span>
-                                <span style={{ color: 'var(--color-primary)' }}>¥{shoppingList.shopping_list.grand_total.toFixed(2)}</span>
+                                <div style={{
+                                    display: 'flex', justifyContent: 'space-between', padding: '14px 12px',
+                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                    borderRadius: '0 0 8px 8px', fontWeight: 700, fontSize: 16, color: '#fff'
+                                }}>
+                                    <span>总计</span>
+                                    <span>¥{shoppingList.shopping_list.grand_total.toFixed(2)}</span>
+                                </div>
+
+                                <div style={{ textAlign: 'center', marginTop: 12, fontSize: 11, color: '#aaa' }}>
+                                    旺财厨房 WoWoKitchen
+                                </div>
                             </div>
                         </div>
                     </div>

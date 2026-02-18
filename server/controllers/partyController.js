@@ -5,33 +5,35 @@ const calculationEngine = require('../services/calculationEngine');
 // 创建饭局
 exports.create = async (req, res) => {
     try {
-        const { name, menu_id } = req.body;
+        const { name, menu_id, dish_ids } = req.body;
         if (!name) {
             return res.status(400).json({ message: '饭局名称不能为空' });
         }
 
         const share_code = crypto.randomBytes(3).toString('hex').toUpperCase();
 
+        // 收集可点菜品 ID
+        let availableDishIds = [];
+
+        if (menu_id) {
+            // 从菜单获取菜品
+            const menuDishes = await MenuDish.findAll({ where: { menu_id } });
+            availableDishIds = menuDishes.map(md => md.dish_id);
+        }
+
+        if (dish_ids && Array.isArray(dish_ids) && dish_ids.length > 0) {
+            // 合并手动选择的菜品 ID（去重）
+            const merged = new Set([...availableDishIds, ...dish_ids]);
+            availableDishIds = [...merged];
+        }
+
         const party = await Party.create({
             host_id: req.user.id,
             name,
             share_code,
             status: 'active',
+            available_dish_ids: availableDishIds.length > 0 ? availableDishIds : null,
         });
-
-        // 如果指定了菜单，预设菜品
-        if (menu_id) {
-            const menuDishes = await MenuDish.findAll({ where: { menu_id } });
-            if (menuDishes.length > 0) {
-                const partyDishes = menuDishes.map(md => ({
-                    party_id: party.id,
-                    dish_id: md.dish_id,
-                    added_by: req.user.username,
-                    servings: md.servings,
-                }));
-                await PartyDish.bulkCreate(partyDishes);
-            }
-        }
 
         const budget = await calculationEngine.calculatePartyBudget(party.id);
         await party.update({ total_budget: budget });
@@ -51,8 +53,7 @@ exports.getMyParties = async (req, res) => {
             include: [
                 { model: PartyGuest, as: 'guests' },
                 {
-                    model: PartyDish,
-                    as: 'partyDishes',
+                    model: PartyDish, as: 'partyDishes',
                     include: [{ model: Dish, as: 'dish' }],
                 },
             ],
@@ -109,14 +110,11 @@ exports.getByShareCode = async (req, res) => {
             where: { share_code: req.params.code },
             include: [
                 {
-                    model: PartyDish,
-                    as: 'partyDishes',
+                    model: PartyDish, as: 'partyDishes',
                     include: [{
-                        model: Dish,
-                        as: 'dish',
+                        model: Dish, as: 'dish',
                         include: [{
-                            model: DishIngredient,
-                            as: 'dishIngredients',
+                            model: DishIngredient, as: 'dishIngredients',
                             include: [{ model: Ingredient, as: 'ingredient' }],
                         }],
                     }],
@@ -127,7 +125,17 @@ exports.getByShareCode = async (req, res) => {
         if (!party) {
             return res.status(404).json({ message: '饭局不存在' });
         }
-        res.json({ party });
+
+        // 如果有 available_dish_ids，拉取可点菜品的完整信息
+        let availableDishes = [];
+        if (party.available_dish_ids && party.available_dish_ids.length > 0) {
+            availableDishes = await Dish.findAll({
+                where: { id: party.available_dish_ids },
+                attributes: ['id', 'name', 'estimated_cost'],
+            });
+        }
+
+        res.json({ party, availableDishes });
     } catch (error) {
         console.error('获取饭局详情失败:', error);
         res.status(500).json({ message: '服务器错误' });
@@ -150,9 +158,7 @@ exports.joinAsGuest = async (req, res) => {
         }
         const guest_token = crypto.randomBytes(16).toString('hex');
         const guest = await PartyGuest.create({
-            party_id: party.id,
-            nickname,
-            guest_token,
+            party_id: party.id, nickname, guest_token,
         });
         res.status(201).json({ message: '加入成功', guest_token, guest });
     } catch (error) {
@@ -161,7 +167,7 @@ exports.joinAsGuest = async (req, res) => {
     }
 };
 
-// 往饭局添加菜品
+// 往饭局添加菜品（同一道菜累加份数）
 exports.addDish = async (req, res) => {
     try {
         const { dish_id, added_by, servings } = req.body;
@@ -173,12 +179,28 @@ exports.addDish = async (req, res) => {
             return res.status(403).json({ message: '饭局已锁定，无法修改' });
         }
 
-        await PartyDish.create({
-            party_id: party.id,
-            dish_id,
-            added_by: added_by || '匿名',
-            servings: servings || 1,
+        // 检查是否在可选菜品范围内
+        if (party.available_dish_ids && party.available_dish_ids.length > 0) {
+            if (!party.available_dish_ids.includes(dish_id)) {
+                return res.status(400).json({ message: '该菜品不在可选范围内' });
+            }
+        }
+
+        // 查找是否已有同一道菜，有则累加份数
+        const existing = await PartyDish.findOne({
+            where: { party_id: party.id, dish_id },
         });
+
+        if (existing) {
+            await existing.update({ servings: existing.servings + (parseInt(servings) || 1) });
+        } else {
+            await PartyDish.create({
+                party_id: party.id,
+                dish_id,
+                added_by: added_by || '匿名',
+                servings: parseInt(servings) || 1,
+            });
+        }
 
         const budget = await calculationEngine.calculatePartyBudget(party.id);
         await party.update({ total_budget: budget });
@@ -208,7 +230,6 @@ exports.removeDish = async (req, res) => {
 
         const budget = await calculationEngine.calculatePartyBudget(party.id);
         await party.update({ total_budget: budget });
-
         res.json({ message: '菜品已移除', total_budget: budget });
     } catch (error) {
         console.error('移除菜品失败:', error);
@@ -235,7 +256,6 @@ exports.updateDishServings = async (req, res) => {
 
         const budget = await calculationEngine.calculatePartyBudget(party.id);
         await party.update({ total_budget: budget });
-
         res.json({ message: '份数已更新', total_budget: budget });
     } catch (error) {
         console.error('修改份数失败:', error);

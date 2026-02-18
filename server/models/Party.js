@@ -33,6 +33,12 @@ const Party = sequelize.define('Party', {
         defaultValue: 0,
         comment: '实时预算',
     },
+    available_dish_ids: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        defaultValue: null,
+        comment: '可点菜品ID列表，为 null 则不限制',
+    },
 }, {
     tableName: 'parties',
 });
